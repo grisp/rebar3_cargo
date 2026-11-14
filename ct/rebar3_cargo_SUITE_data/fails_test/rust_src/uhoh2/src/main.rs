@@ -4,5 +4,5 @@ fn main() {
 
 #[test]
 fn it_breaks() {
-    assert!(false);
+    assert!(false, "deliberate Rust fixture test failure");
 }

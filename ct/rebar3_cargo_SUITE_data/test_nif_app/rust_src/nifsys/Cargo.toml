@@ -2,11 +2,15 @@
 name = "nifsys"
 version = "0.0.2"
 authors = ["Daniel Goertzen <daniel.goertzen@gmail.com>"]
+edition = "2021"
 
 [lib]
 name = "nifsys"
 crate-type = ["cdylib"]
+# NIF entry points run inside BEAM; the standalone harness cannot link enif_*.
+# Erlang EUnit exercises every exported function inside BEAM.
+test = false
+doctest = false
 
 [dependencies]
-rustler = "0.22.0-rc.1"
-lazy_static = "1.2.0"
+rustler = "0.39.0"

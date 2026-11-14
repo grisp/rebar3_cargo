@@ -10,17 +10,27 @@ jobs:
 
   build:
 
-    runs-on: ubuntu-latest
-
-    container:
-      image: erlang:22.0.7
+    runs-on: ubuntu-26.04
 
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
+    - uses: actions/checkout@v7
+    - uses: erlef/setup-beam@v1
+      with:
+        otp-version: '27.3.4.18'
+        rebar3-version: '3.28.0'
+        version-type: strict
+    - uses: actions-rust-lang/setup-rust-toolchain@v2
       with:
         toolchain: stable
     - name: Compile
       run: rebar3 compile
-    - name: Run tests
-      run: rebar3 do eunit, ct
+    - name: EUnit
+      run: rebar3 eunit
+    # libtest's JSON output is unstable; ordinary compilation stays on stable.
+    - uses: actions-rust-lang/setup-rust-toolchain@v2
+      with:
+        toolchain: nightly
+    - name: Common Test
+      env:
+        RUSTUP_TOOLCHAIN: nightly
+      run: rebar3 ct

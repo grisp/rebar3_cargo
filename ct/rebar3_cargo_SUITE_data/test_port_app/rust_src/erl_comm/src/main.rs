@@ -32,7 +32,7 @@ fn write_cmd(buf: &[u8]) -> io::Result<()> {
 // port.c
 
 fn main_loop() -> io::Result<()> {
-    let mut buf: [u8; 100] = unsafe { std::mem::uninitialized() };
+    let mut buf: [u8; 100] = [0; 100];
 
     loop {
         let res = {

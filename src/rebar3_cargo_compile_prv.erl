@@ -41,18 +41,36 @@ format_error(Reason) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    try do_build(State)
+    catch
+        error:{cargo_not_found, Cargo} ->
+            rebar_api:abort(
+                "Cargo executable '~s' was not found in PATH. " ++
+                "The Cargo build hook runs on this host; install Rust/Cargo " ++
+                "and check 'cargo --version' in this terminal.", [Cargo])
+    end.
+
+do_build(State) ->
     %% execute for each app
     State1 =
         case rebar_state:current_app(State) of
             undefined ->
                 rebar_api:info("No current app, using project apps", []),
                 NewApps = [
-                    rebar3_cargo_compile:compile_app(App, State)
+                    compile_app(App, State)
                  || App <- rebar_state:project_apps(State)
                 ],
                 rebar_state:project_apps(State, NewApps);
             AppInfo ->
-                rebar_state:current_app(State, rebar3_cargo_compile:compile_app(AppInfo, State))
+                rebar_state:current_app(State, compile_app(AppInfo, State))
         end,
 
     {ok, State1}.
+
+compile_app(App, State) ->
+    case rebar3_cargo_util:is_cargo_app(App) of
+        true ->
+            rebar3_cargo_compile:compile_app(App, State);
+        false ->
+            App
+    end.

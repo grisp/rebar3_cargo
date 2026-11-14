@@ -6,10 +6,78 @@
     get_apps/1,
     get_priv_dir/1,
     cargo_init/3,
-    is_cargo_app/1
+    is_cargo_app/1,
+    build/1,
+    run/1,
+    diagnostics/1
 ]).
 
 -define(DEFAULT_TARGET_DIR, "target").
+
+%% Use raw messages for frontend reporting before selecting build artifacts.
+build(Cargo) ->
+    Packages = cargo:get_package_versions(Cargo),
+    Output = run(fun() -> cargo:build_raw(Cargo, false) end),
+    lists:filtermap(
+        fun(Entry) ->
+            case cargo_artifact:from_json(Entry) of
+                {ok, Artifact} ->
+                    case maps:find(cargo_artifact:package_id(Artifact), Packages) of
+                        {ok, #{version := Version}} ->
+                            {true, cargo_artifact:version(Artifact, Version)};
+                        error ->
+                            false
+                    end;
+                error ->
+                    false
+            end
+        end,
+        Output
+    ).
+
+%% Preserve the backend result and original error while reporting through Rebar.
+run(Command) ->
+    try Command() of
+        Output ->
+            diagnostics(Output),
+            Output
+    catch
+        error:{cargo_error, {_Code, Output}} = Reason:Stack ->
+            diagnostics(Output),
+            erlang:raise(error, Reason, Stack)
+    end.
+
+diagnostics(Output) ->
+    lists:foreach(
+        fun
+            (#{<<"reason">> := <<"compiler-message">>, <<"message">> := Message}) ->
+                Level =
+                    case maps:get(<<"level">>, Message) of
+                        <<"error">> -> error;
+                        <<"warning">> -> warn;
+                        _ -> info
+                    end,
+                Rendered = maps:get(<<"rendered">>, Message, null),
+                Text =
+                    case Rendered of
+                        null -> maps:get(<<"message">>, Message);
+                        _ -> Rendered
+                    end,
+                rebar_log:log(Level, "~ts", [Text]),
+                lists:foreach(
+                    fun(#{<<"message">> := Child}) ->
+                        case binary:match(Text, Child) of
+                            nomatch -> rebar_log:log(Level, "~ts", [Child]);
+                            _ -> ok
+                        end
+                    end,
+                    maps:get(<<"children">>, Message, [])
+                );
+            (_) ->
+                ok
+        end,
+        Output
+    ).
 
 -spec get_apps(rebar_state:t()) -> [rebar_app_info:t()].
 get_apps(State) ->
@@ -35,14 +103,22 @@ get_priv_dir(App) ->
     CargoOpts :: rebar3_cargo_opts:t(),
     IsRelease :: boolean()
 ) -> cargo_opts:t().
-cargo_init(App, _CargoOpts, IsRelease) ->
-    cargo_opts:new(#{
-        path => get_src_dir(App),
-        target_dir => list_to_binary(
-            filename:join([rebar_app_info:out_dir(App), ?DEFAULT_TARGET_DIR])
-        ),
-        release => IsRelease
-    }).
+cargo_init(App, CargoOpts, IsRelease) ->
+    Cargo0 = rebar3_cargo_opts:cargo(CargoOpts),
+    AppDir = rebar_app_info:dir(App),
+    SrcDir = filename:join(AppDir, rebar3_cargo_opts:src_dir(CargoOpts)),
+    OutDir = rebar_app_info:out_dir(App),
+    RelativeTargetDir =
+        case cargo_opts:target_dir(Cargo0) of
+            undefined ->
+                ?DEFAULT_TARGET_DIR;
+            Configured ->
+                Configured
+        end,
+    TargetDir = filename:absname(RelativeTargetDir, OutDir),
+    Cargo1 = cargo_opts:path(Cargo0, SrcDir),
+    Cargo2 = cargo_opts:target_dir(Cargo1, cargo_util:ensure_binary(TargetDir)),
+    cargo_opts:release(Cargo2, IsRelease).
 
 -spec get_src_dir(rebar_app_info:t()) -> filelib:path().
 get_src_dir(App) ->
